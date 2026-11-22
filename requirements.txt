@@ -1,0 +1,10 @@
+# Core (relational popularity and analyses). Versions are those used for the paper.
+torch==2.5.1
+numpy
+scipy==1.17.1
+scikit-learn==1.9.0
+sentence-transformers==6.0.0
+matplotlib==3.11.1
+rapidfuzz
+# Baselines additionally need CRSLab and UniCRS (see baselines/patches) and, for the
+# zero-shot LLM and requester-feedback labels, vllm in a separate environment.

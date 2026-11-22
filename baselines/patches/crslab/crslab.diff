@@ -1,0 +1,423 @@
+diff --git a/crslab/data/__init__.py b/crslab/data/__init__.py
+index 33bea19..effdbd3 100644
+--- a/crslab/data/__init__.py
++++ b/crslab/data/__init__.py
+@@ -29,7 +29,8 @@ dataset_register_table = {
+     'GoRecDial': GoRecDialDataset,
+     'OpenDialKG': OpenDialKGDataset,
+     'Inspired': InspiredDataset,
+-    'DuRecDial': DuRecDialDataset
++    'DuRecDial': DuRecDialDataset,
++    'RedditMovie': RedditDataset  # WWW27
+ }
+ 
+ dataset_language_map = {
+@@ -38,7 +39,8 @@ dataset_language_map = {
+     'GoRecDial': 'en',
+     'OpenDialKG': 'en',
+     'Inspired': 'en',
+-    'DuRecDial': 'zh'
++    'DuRecDial': 'zh',
++    'RedditMovie': 'en'  # WWW27
+ }
+ 
+ dataloader_register_table = {
+diff --git a/crslab/data/dataloader/kbrd.py b/crslab/data/dataloader/kbrd.py
+index 2720c5d..a2a28cd 100644
+--- a/crslab/data/dataloader/kbrd.py
++++ b/crslab/data/dataloader/kbrd.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/11/27
+ # @Author : Xiaolei Wang
+ # @Email  : wxl1999@foxmail.com
+@@ -58,11 +59,12 @@ class KBRDDataLoader(BaseDataLoader):
+         for conv_dict in tqdm(self.dataset):
+             if conv_dict['role'] == 'Recommender':
+                 for movie in conv_dict['items']:
+-                    augment_conv_dict = {'context_entities': conv_dict['context_entities'], 'item': movie}
++                    augment_conv_dict = {'context_entities': conv_dict['context_entities'], 'item': movie, 'conv_id': conv_dict.get('conv_id')}  # WWW27
+                     augment_dataset.append(augment_conv_dict)
+         return augment_dataset
+ 
+     def rec_batchify(self, batch):
++        www27_hook.META = [d.get('conv_id') for d in batch]  # WWW27
+         batch_context_entities = []
+         batch_movies = []
+         for conv_dict in batch:
+diff --git a/crslab/data/dataloader/kgsf.py b/crslab/data/dataloader/kgsf.py
+index 6bbcac4..7ab1a26 100644
+--- a/crslab/data/dataloader/kgsf.py
++++ b/crslab/data/dataloader/kgsf.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/11/22
+ # @Author : Kun Zhou
+ # @Email  : francis_kun_zhou@163.com
+@@ -87,6 +88,7 @@ class KGSFDataLoader(BaseDataLoader):
+         return augment_dataset
+ 
+     def rec_batchify(self, batch):
++        www27_hook.META = [d.get('conv_id') for d in batch]  # WWW27
+         batch_context_entities = []
+         batch_context_words = []
+         batch_item = []
+diff --git a/crslab/data/dataloader/redial.py b/crslab/data/dataloader/redial.py
+index 6cd1289..63e7cf1 100644
+--- a/crslab/data/dataloader/redial.py
++++ b/crslab/data/dataloader/redial.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/11/22
+ # @Author : Chenzhan Shang
+ # @Email  : czshang@outlook.com
+@@ -69,17 +70,18 @@ class ReDialDataLoader(BaseDataLoader):
+             if conversation['role'] == 'Recommender':
+                 for item in conversation['items']:
+                     context_entities = conversation['context_entities']
+-                    dataset.append({'context_entities': context_entities, 'item': item})
++                    dataset.append({'context_entities': context_entities, 'item': item, 'conv_id': conversation.get('conv_id')})  # WWW27
+         return dataset
+ 
+     def rec_batchify(self, batch):
++        www27_hook.META = [d.get('conv_id') for d in batch]  # WWW27
+         batch_context_entities = []
+         batch_item = []
+         for conversation in batch:
+             batch_context_entities.append(conversation['context_entities'])
+             batch_item.append(conversation['item'])
+         context_entities = get_onehot(batch_context_entities, self.n_entity)
+-        return {'context_entities': context_entities, 'item': torch.tensor(batch_item, dtype=torch.long)}
++        return {'context_entities': context_entities, 'item': torch.tensor(batch_item, dtype=torch.long), 'ctx_list': batch_context_entities}  # WWW27
+ 
+     def conv_process_fn(self):
+         dataset = []
+diff --git a/crslab/data/dataloader/tgredial.py b/crslab/data/dataloader/tgredial.py
+index bef2ca7..435220c 100644
+--- a/crslab/data/dataloader/tgredial.py
++++ b/crslab/data/dataloader/tgredial.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/12/9
+ # @Author : Yuanhang Zhou
+ # @Email  : sdzyh002@gmail.com
+@@ -101,6 +102,7 @@ class TGReDialDataLoader(BaseDataLoader):
+     def rec_process_fn(self, *args, **kwargs):
+         augment_dataset = []
+         for conv_dict in tqdm(self.dataset):
++            if conv_dict.get('role', 'Recommender') != 'Recommender': continue  # WWW27: same sample set as KBRD/KGSF (Recommender turns)
+             for movie in conv_dict['items']:
+                 augment_conv_dict = deepcopy(conv_dict)
+                 augment_conv_dict['item'] = movie
+@@ -144,6 +146,8 @@ class TGReDialDataLoader(BaseDataLoader):
+             return input_ids, input_mask, sample_negs
+ 
+     def rec_batchify(self, batch):
++        www27_hook.META = [d.get('conv_id') for d in batch]  # WWW27
++        www27_hook.CTX = [list(d.get('interaction_history', [])) + list(d['context_items']) for d in batch]  # WWW27 (history+context items, as the model sees)
+         batch_context = []
+         batch_movie_id = []
+         batch_input_ids = []
+diff --git a/crslab/data/dataloader/utils.py b/crslab/data/dataloader/utils.py
+index 01b7c20..dac6cb9 100644
+--- a/crslab/data/dataloader/utils.py
++++ b/crslab/data/dataloader/utils.py
+@@ -88,13 +88,12 @@ def get_onehot(data_list, categories) -> torch.Tensor:
+         torch.Tensor: one-hot labels.
+ 
+     """
+-    onehot_labels = []
+-    for label_list in data_list:
+-        onehot_label = torch.zeros(categories)
+-        for label in label_list:
+-            onehot_label[label] = 1.0 / len(label_list)
+-        onehot_labels.append(onehot_label)
+-    return torch.stack(onehot_labels, dim=0)
++    # WWW27 patch: vectorized, numerically identical to the original per-row loop
++    out = torch.zeros(len(data_list), categories)
++    for i, label_list in enumerate(data_list):
++        if len(label_list) > 0:
++            out[i, torch.as_tensor(label_list, dtype=torch.long)] = 1.0 / len(label_list)
++    return out
+ 
+ 
+ def add_start_end_token_idx(vec: list, start_token_idx: int = None, end_token_idx: int = None):
+diff --git a/crslab/data/dataset/__init__.py b/crslab/data/dataset/__init__.py
+index dbf23f5..1a98f80 100644
+--- a/crslab/data/dataset/__init__.py
++++ b/crslab/data/dataset/__init__.py
+@@ -5,3 +5,4 @@ from .inspired import InspiredDataset
+ from .opendialkg import OpenDialKGDataset
+ from .redial import ReDialDataset
+ from .tgredial import TGReDialDataset
++from .reddit import RedditDataset  # WWW27
+diff --git a/crslab/data/dataset/tgredial/tgredial.py b/crslab/data/dataset/tgredial/tgredial.py
+index 90e03e3..07c0976 100644
+--- a/crslab/data/dataset/tgredial/tgredial.py
++++ b/crslab/data/dataset/tgredial/tgredial.py
+@@ -188,8 +188,10 @@ class TGReDialDataset(BaseDataset):
+     def _raw_data_process(self, raw_data):
+         augmented_convs = [self._convert_to_id(conversation) for conversation in tqdm(raw_data)]
+         augmented_conv_dicts = []
+-        for conv in tqdm(augmented_convs):
+-            augmented_conv_dicts.extend(self._augment_and_add(conv))
++        for raw, conv in zip(raw_data, tqdm(augmented_convs)):
++            ds = self._augment_and_add(conv)
++            for d in ds: d['conv_id'] = raw['conv_id']  # WWW27: keep conv id for per-sample history-repeat eval
++            augmented_conv_dicts.extend(ds)
+         return augmented_conv_dicts
+ 
+     def _convert_to_id(self, conversation):
+diff --git a/crslab/model/crs/kgsf/resources.py b/crslab/model/crs/kgsf/resources.py
+index c32dcd2..47a7ed1 100644
+--- a/crslab/model/crs/kgsf/resources.py
++++ b/crslab/model/crs/kgsf/resources.py
+@@ -60,3 +60,4 @@ resources = {
+         )
+     }
+ }
++resources["RedditMovie"] = resources["ReDial"]  # WWW27: copy-mask resource only used by the (skipped) conversation stage
+diff --git a/crslab/system/kbrd.py b/crslab/system/kbrd.py
+index 085eda4..01665e0 100644
+--- a/crslab/system/kbrd.py
++++ b/crslab/system/kbrd.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # -*- encoding: utf-8 -*-
+ # @Time    :   2020/12/4
+ # @Author  :   Xiaolei Wang
+@@ -86,6 +87,7 @@ class KBRDSystem(BaseSystem):
+                 self.backward(rec_loss)
+             else:
+                 self.rec_evaluate(rec_scores, batch['item'])
++                www27_hook.dump(mode, rec_scores, batch['item'].tolist(), batch['context_entities'], self.item_ids)
+             rec_loss = rec_loss.item()
+             self.evaluator.optim_metrics.add("rec_loss", AverageMetric(rec_loss))
+         else:
+@@ -108,6 +110,7 @@ class KBRDSystem(BaseSystem):
+         for epoch in range(self.rec_epoch):
+             self.evaluator.reset_metrics()
+             logger.info(f'[Recommendation epoch {str(epoch)}]')
++            www27_hook.STATE["epoch"] = epoch
+             logger.info('[Train]')
+             for batch in self.train_dataloader.get_rec_data(self.rec_batch_size):
+                 self.step(batch, stage='rec', mode='train')
+@@ -120,10 +123,17 @@ class KBRDSystem(BaseSystem):
+                     self.step(batch, stage='rec', mode='valid')
+                 self.evaluator.report(epoch=epoch, mode='valid')
+                 # early stop
+-                metric = self.evaluator.optim_metrics['rec_loss']
+-                if self.early_stop(metric):
++                # WWW27: valid HR@1+HR@50 (max), same criterion as KGSF/UCCR; test is NOT computed during training
++                metric = self.evaluator.rec_metrics['hit@1'] + self.evaluator.rec_metrics['hit@50']
++                stop = self.early_stop(metric)
++                if self.drop_cnt == 0:
++                    self._www27_best = {k: v.detach().clone() for k, v in self.model.state_dict().items()}; self._www27_best_ep = epoch
++                if stop:
+                     break
+-        # test
++        # test: restore the best-valid checkpoint, evaluate test once
++        if getattr(self, '_www27_best', None) is not None:
++            self.model.load_state_dict(self._www27_best); logger.info(f'[WWW27 restored best-valid epoch {self._www27_best_ep}]')
++        www27_hook.STATE["epoch"] = "final"
+         logger.info('[Test]')
+         with torch.no_grad():
+             self.evaluator.reset_metrics()
+@@ -168,7 +178,8 @@ class KBRDSystem(BaseSystem):
+ 
+     def fit(self):
+         self.train_recommender()
+-        self.train_conversation()
++        if self.conv_epoch > 0:  # ReDial-MS: recommendation-only runs set conv epoch 0
++            self.train_conversation()
+ 
+     def interact(self):
+         pass
+diff --git a/crslab/system/kgsf.py b/crslab/system/kgsf.py
+index 7f7b2a6..f696c6c 100644
+--- a/crslab/system/kgsf.py
++++ b/crslab/system/kgsf.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/11/22
+ # @Author : Kun Zhou
+ # @Email  : francis_kun_zhou@163.com
+@@ -91,6 +92,7 @@ class KGSFSystem(BaseSystem):
+                 self.backward(loss.sum())
+             else:
+                 self.rec_evaluate(rec_predict, batch[-1])
++                www27_hook.dump(mode, rec_predict, batch[-1].tolist(), batch[0], self.item_ids)
+             rec_loss = rec_loss.sum().item()
+             self.evaluator.optim_metrics.add("rec_loss", AverageMetric(rec_loss))
+             if info_loss:
+@@ -128,6 +130,7 @@ class KGSFSystem(BaseSystem):
+         for epoch in range(self.rec_epoch):
+             self.evaluator.reset_metrics()
+             logger.info(f'[Recommendation epoch {str(epoch)}]')
++            www27_hook.STATE["epoch"] = epoch
+             logger.info('[Train]')
+             for batch in self.train_dataloader.get_rec_data(self.rec_batch_size, shuffle=False):
+                 self.step(batch, stage='rec', mode='train')
+@@ -141,9 +144,13 @@ class KGSFSystem(BaseSystem):
+                 self.evaluator.report(epoch=epoch, mode='val')
+                 # early stop
+                 metric = self.evaluator.rec_metrics['hit@1'] + self.evaluator.rec_metrics['hit@50']
++                # WWW27: per-epoch test pass for offline best-valid selection (dump only; selection uses valid)
++                for batch in self.test_dataloader.get_rec_data(self.rec_batch_size, shuffle=False):
++                    self.step(batch, stage='rec', mode='test')
+                 if self.early_stop(metric):
+                     break
+         # test
++        www27_hook.STATE["epoch"] = "final"
+         logger.info('[Test]')
+         with torch.no_grad():
+             self.evaluator.reset_metrics()
+@@ -152,7 +159,9 @@ class KGSFSystem(BaseSystem):
+             self.evaluator.report(mode='test')
+ 
+     def train_conversation(self):
+-        if os.environ["CUDA_VISIBLE_DEVICES"] == '-1':
++        if self.conv_epoch == 0:  # WWW27: rec-only run; skip conv train AND conv test (conv test crashes without word2vec vocab)
++            return
++        if os.environ["CUDA_VISIBLE_DEVICES"] == '-1' or len(os.environ["CUDA_VISIBLE_DEVICES"]) == 1:  # WWW27: single GPU has no DataParallel .module
+             self.model.freeze_parameters()
+         else:
+             self.model.module.freeze_parameters()
+diff --git a/crslab/system/ntrd.py b/crslab/system/ntrd.py
+index ab1e923..4da38e4 100644
+--- a/crslab/system/ntrd.py
++++ b/crslab/system/ntrd.py
+@@ -4,7 +4,7 @@
+ 
+ import os
+ from crslab.evaluator.metrics import gen
+-from numpy.core.numeric import NaN
++from numpy import nan as NaN  # compat: numpy>=2
+ 
+ import torch
+ from loguru import logger
+diff --git a/crslab/system/redial.py b/crslab/system/redial.py
+index 0276e90..d53686f 100644
+--- a/crslab/system/redial.py
++++ b/crslab/system/redial.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/12/4
+ # @Author : Chenzhan Shang
+ # @Email  : czshang@outlook.com
+@@ -86,6 +87,7 @@ class ReDialSystem(BaseSystem):
+                 self.backward(rec_loss)
+             else:
+                 self.rec_evaluate(rec_scores, batch['item'])
++                www27_hook.dump(mode, rec_scores, batch['item'].tolist(), batch['ctx_list'], self.item_ids)  # WWW27
+             rec_loss = rec_loss.item()
+             self.evaluator.optim_metrics.add("rec_loss", AverageMetric(rec_loss))
+         else:
+@@ -105,6 +107,7 @@ class ReDialSystem(BaseSystem):
+         for epoch in range(self.rec_epoch):
+             self.evaluator.reset_metrics()
+             logger.info(f'[Recommendation epoch {str(epoch)}]')
++            www27_hook.STATE["epoch"] = epoch  # WWW27
+             logger.info('[Train]')
+             for batch in self.train_dataloader['rec'].get_rec_data(batch_size=self.rec_batch_size):
+                 self.step(batch, stage='rec', mode='train')
+@@ -117,10 +120,17 @@ class ReDialSystem(BaseSystem):
+                     self.step(batch, stage='rec', mode='valid')
+                 self.evaluator.report(epoch=epoch, mode='valid')  # report valid loss
+                 # early stop
+-                metric = self.evaluator.optim_metrics['rec_loss']
+-                if self.early_stop(metric):
++                # WWW27: valid HR@1+HR@50 (max) as KBRD/KGSF; keep best-valid weights, test once after restore
++                metric = self.evaluator.rec_metrics['hit@1'] + self.evaluator.rec_metrics['hit@50']
++                stop = self.early_stop(metric)
++                if self.drop_cnt == 0:
++                    self._www27_best = {k: v.detach().clone() for k, v in self.rec_model.state_dict().items()}; self._www27_best_ep = epoch
++                if stop:
+                     break
+         # test
++        if getattr(self, '_www27_best', None) is not None:
++            self.rec_model.load_state_dict(self._www27_best); logger.info(f'[WWW27 restored best-valid epoch {self._www27_best_ep}]')
++        www27_hook.STATE["epoch"] = "final"  # WWW27
+         logger.info('[Test]')
+         with torch.no_grad():
+             self.evaluator.reset_metrics()
+@@ -129,6 +139,7 @@ class ReDialSystem(BaseSystem):
+             self.evaluator.report(mode='test')
+ 
+     def train_conversation(self):
++        if self.conv_epoch == 0: return  # WWW27: rec-only baseline, conversation stage skipped
+         self.init_optim(self.conv_optim_opt, self.conv_model.parameters())
+ 
+         for epoch in range(self.conv_epoch):
+diff --git a/crslab/system/tgredial.py b/crslab/system/tgredial.py
+index 3aaaa7b..3a4a30f 100644
+--- a/crslab/system/tgredial.py
++++ b/crslab/system/tgredial.py
+@@ -1,3 +1,4 @@
++from crslab import www27_hook
+ # @Time   : 2020/12/9
+ # @Author : Yuanhang Zhou
+ # @Email  : sdzyh002@gmail.com
+@@ -142,6 +143,7 @@ class TGReDialSystem(BaseSystem):
+                 self.backward(rec_loss)
+             else:
+                 self.rec_evaluate(rec_predict, batch[-1])
++                www27_hook.dump('valid' if mode == 'val' else mode, rec_predict, batch[-1].tolist(), www27_hook.CTX, self.item_ids)  # WWW27
+             rec_loss = rec_loss.item()
+             self.evaluator.optim_metrics.add("rec_loss",
+                                              AverageMetric(rec_loss))
+@@ -170,7 +172,7 @@ class TGReDialSystem(BaseSystem):
+             if os.environ["CUDA_VISIBLE_DEVICES"] == '-1':
+                 bert_param = list(self.rec_model.bert.named_parameters())
+             else:
+-                bert_param = list(self.rec_model.module.bert.named_parameters())
++                bert_param = list(getattr(self.rec_model, 'module', self.rec_model).bert.named_parameters())  # WWW27: no DataParallel
+             bert_param_name = ['bert.' + n for n, p in bert_param]
+         else:
+             bert_param = []
+@@ -186,6 +188,7 @@ class TGReDialSystem(BaseSystem):
+         for epoch in range(self.rec_epoch):
+             self.evaluator.reset_metrics()
+             logger.info(f'[Recommendation epoch {str(epoch)}]')
++            www27_hook.STATE["epoch"] = epoch  # WWW27
+             for batch in self.train_dataloader['rec'].get_rec_data(self.rec_batch_size,
+                                                                    shuffle=True):
+                 self.step(batch, stage='rec', mode='train')
+@@ -199,9 +202,15 @@ class TGReDialSystem(BaseSystem):
+                 self.evaluator.report(epoch=epoch, mode='val')
+                 # early stop
+                 metric = self.evaluator.rec_metrics['hit@1'] + self.evaluator.rec_metrics['hit@50']
+-                if self.early_stop(metric):
++                stop = self.early_stop(metric)
++                if self.drop_cnt == 0:  # WWW27: keep best-valid weights
++                    self._www27_best = {k: v.detach().clone() for k, v in self.rec_model.state_dict().items()}; self._www27_best_ep = epoch
++                if stop:
+                     break
+-        # test
++        # test (WWW27: restore best-valid weights, test once)
++        if getattr(self, '_www27_best', None) is not None:
++            self.rec_model.load_state_dict(self._www27_best); logger.info(f'[WWW27 restored best-valid epoch {self._www27_best_ep}]')
++        www27_hook.STATE["epoch"] = "final"
+         with torch.no_grad():
+             self.evaluator.reset_metrics()
+             for batch in self.test_dataloader['rec'].get_rec_data(self.rec_batch_size,
+@@ -286,6 +295,7 @@ class TGReDialSystem(BaseSystem):
+     def fit(self):
+         if hasattr(self, 'rec_model'):
+             self.train_recommender()
++        if os.environ.get("WWW27_RECONLY"): return  # WWW27: rec-only baseline
+         if hasattr(self, 'policy_model'):
+             self.train_policy()
+         if hasattr(self, 'conv_model'):
+diff --git a/run_crslab.py b/run_crslab.py
+index b0f7f73..75bff9d 100644
+--- a/run_crslab.py
++++ b/run_crslab.py
+@@ -38,6 +38,7 @@ if __name__ == '__main__':
+     args, _ = parser.parse_known_args()
+     config = Config(args.config, args.gpu, args.debug)
+ 
++    from crslab import www27_hook; www27_hook.seed()
+     from crslab.quick_start import run_crslab
+ 
+     run_crslab(config, args.save_data, args.restore_data, args.save_system, args.restore_system, args.interact,
